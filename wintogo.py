@@ -33,13 +33,19 @@ from pathlib import Path
 APP_NAME = "WinToGo Creator"
 APP_ID = "wintogo"
 ORG = "WinToGo"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 # Каталоги с системными утилитами — pkexec обрезает PATH, поэтому дополняем явно.
 SBIN_PATHS = ["/usr/sbin", "/sbin", "/usr/local/sbin"]
 APP_DIR = Path(__file__).resolve().parent
 BCD_TEMPLATE = APP_DIR / "assets" / "bcd" / "BCD"          # опциональный шаблон
 BCD_TEMPLATE_META = APP_DIR / "assets" / "bcd" / "BCD.json"  # его GUID-плейсхолдеры
+
+# BCD-SYS (github.com/jpz4085/BCD-SYS, GPL-3.0) — вендорится как отдельная
+# GPL-программа и вызывается через subprocess (наш код остаётся MIT). Создаёт
+# BCD и копирует EFI-загрузчик, как bcdboot, но из Linux.
+BCD_SYS_DIR = APP_DIR / "third_party" / "bcd-sys"
+BCD_SYS_TOOLS = ["hivexsh", "hivexregedit", "setfattr", "fatattr", "peres", "xxd"]
 
 # Размеры разметки
 ESP_SIZE_MIB = 300          # системный EFI-раздел (FAT32)
@@ -363,14 +369,86 @@ def disk_uuid(device):
     return run(["lsblk", "-ndo", "PTUUID", device], check=False).stdout.strip()
 
 
-def install_bootloader_uefi(esp_mount, win_mount, device, win_part):
-    """Копирование EFI-загрузчика Windows на ESP и создание BCD.
+def bcd_sys_script():
+    p = BCD_SYS_DIR / "Linux" / "bcd-sys.sh"
+    return str(p) if p.exists() else None
 
-    Копирование файлов bootmgfw.efi надёжно. BCD — единственная часть,
-    которую невозможно проверить без загрузки на железе; делается best-effort
-    и отдельно сигналит о результате (needs_bcd).
+
+def bcd_sys_missing_tools():
+    return [t for t in BCD_SYS_TOOLS if not which(t)]
+
+
+def run_bcd_sys(win_mount, esp_mount, firmware, prodname=None):
+    """Настроить загрузчик и BCD через вендоренный BCD-SYS. Возвращает True при
+    успехе. BCD-SYS сам копирует EFI-файлы и создаёт BCD (как bcdboot).
+
+    Скрипт запускается из копии в /tmp: у копии снимается защита «не запускать
+    от root» (мы уже в root-конвейере, всё смонтировали сами и передаём -s, так
+    что его пути авто-монтирования не задействуются — это безопасно). Вендорный
+    исходник остаётся нетронутым.
     """
+    script = bcd_sys_script()
+    if not script:
+        return False
+    work = tempfile.mkdtemp(prefix="wintogo-bcdsys-")
+    try:
+        dst = os.path.join(work, "bcd-sys")
+        shutil.copytree(BCD_SYS_DIR, dst)
+        main = os.path.join(dst, "Linux", "bcd-sys.sh")
+        text = Path(main).read_text()
+        text = text.replace("if [[ $EUID -eq 0 ]]; then",
+                            "if false; then  # neutralized by WinToGo (root pipeline)", 1)
+        Path(main).write_text(text)
+
+        cmd = ["bash", "./bcd-sys.sh", win_mount, "-f", firmware, "-v"]
+        if esp_mount:
+            cmd += ["-s", esp_mount]
+        if prodname:
+            cmd += ["-n", prodname]
+        log("Запуск BCD-SYS: " + " ".join(cmd))
+        proc = subprocess.Popen(
+            cmd, cwd=os.path.join(dst, "Linux"),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, env=_augmented_env(), bufsize=1)
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                log("[bcd-sys] " + line)
+        return proc.wait() == 0
+    except Exception as e:
+        log(f"BCD-SYS: исключение {e}")
+        return False
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def try_bcd_sys(win_mount, esp_mount, firmware):
+    """Обёртка с проверками. Возвращает True, если загрузчик настроен BCD-SYS."""
+    if not bcd_sys_script():
+        log("BCD-SYS не найден (third_party/bcd-sys) — запасной способ")
+        return False
+    missing = bcd_sys_missing_tools()
+    if missing:
+        log("BCD-SYS есть, но не хватает утилит: " + ", ".join(missing) +
+            " (sudo apt install libhivex-bin pev attr fatattr xxd) — запасной способ")
+        return False
+    if run_bcd_sys(win_mount, esp_mount, firmware):
+        log("Загрузчик и BCD настроены через BCD-SYS ✓")
+        return True
+    log("BCD-SYS завершился с ошибкой — запасной способ")
+    return False
+
+
+def install_bootloader_uefi(esp_mount, win_mount, device, win_part):
+    """Настроить UEFI-загрузчик. Предпочтительно через BCD-SYS (копирует
+    EFI-файлы и создаёт BCD). Если он недоступен/не справился — запасной способ:
+    ручное копирование EFI-файлов + BCD (шаблон/предупреждение).
+    Возвращает needs_bcd (True, если BCD так и не создан)."""
     stage("Установка загрузчика (UEFI)")
+    if try_bcd_sys(win_mount, esp_mount, "uefi"):
+        return False
+
+    log("Запасной способ: ручное копирование EFI-файлов")
     src_efi = os.path.join(win_mount, "Windows", "Boot", "EFI")
     if not os.path.isdir(src_efi):
         raise RuntimeError("в образе нет Windows\\Boot\\EFI — образ повреждён?")
@@ -480,12 +558,18 @@ def _build_bcd_hivex(bcd_path, part_guid, disk_guid, uefi):
 
 def install_bootloader_bios(win_mount, device, win_part):
     stage("Установка загрузчика (BIOS/MBR)")
-    log("BIOS-режим экспериментальный: требуется ms-sys для загрузочного "
-        "сектора NTFS; если его нет — завершите загрузчик вручную (bootsect).")
+    # Загрузочные сектора (NTFS boot sector + MBR bootstrap) — их BCD-SYS не
+    # делает, они нужны для BIOS-цепочки к bootmgr.
     if which("ms-sys"):
         run(["ms-sys", "-n", win_part], check=False)   # NTFS boot sector
         run(["ms-sys", "-m", device], check=False)      # MBR bootstrap
-    # BCD для BIOS лежит в \boot\BCD раздела Windows
+    else:
+        log("ms-sys не найден: загрузочный сектор NTFS/MBR не записан — "
+            "BIOS-загрузка может не заработать (эксперим. режим).")
+    # Файлы bootmgr + BCD (\boot\BCD) через BCD-SYS; система = сам раздел Windows.
+    if try_bcd_sys(win_mount, win_mount, "bios"):
+        return False
+    log("Запасной способ: BCD в \\boot\\BCD автоматически не создан.")
     dst = os.path.join(win_mount, "boot")
     os.makedirs(dst, exist_ok=True)
     return _write_bcd(dst, device, win_part, uefi=False)
@@ -512,7 +596,10 @@ def core_create(params):
              if firmware == "uefi" else
              f"parted … одна NTFS-партиция; mkfs.ntfs; set boot on"),
             f"wimlib-imagex apply <iso>/sources/install.wim {params.get('index')} <win>",
-            "копирование EFI-загрузчика + создание BCD",
+            ("загрузчик через BCD-SYS (копирует EFI-файлы + создаёт BCD)"
+             if bcd_sys_script() and not bcd_sys_missing_tools()
+             else "загрузчик: запасной способ (BCD-SYS недоступен) — "
+                  "проверьте зависимости libhivex-bin/pev/attr/fatattr/xxd"),
         ]
         for step in plan:
             log("[dry-run] " + step)
@@ -726,14 +813,21 @@ def run_gui():
             self.logview.appendPlainText(text)
 
         def check_deps(self):
-            missing = [t for t in ("wimlib-imagex", "parted", "mkfs.ntfs",
-                                   "mkfs.fat", "pkexec")
-                       if not which(t)]
-            if missing:
+            core = [t for t in ("wimlib-imagex", "parted", "mkfs.ntfs",
+                                 "mkfs.fat", "pkexec") if not which(t)]
+            if core:
                 self.append_log(
-                    "⚠ Не установлены: " + ", ".join(missing) +
-                    "\n  Установите:  sudo apt install wimtools gdisk "
-                    "dosfstools ntfs-3g libhivex-bin policykit-1")
+                    "⚠ Нет основных утилит: " + ", ".join(core) +
+                    "\n  sudo apt install wimtools gdisk dosfstools ntfs-3g policykit-1")
+            bcd_missing = bcd_sys_missing_tools()
+            if not bcd_sys_script():
+                self.append_log("⚠ Не найден third_party/bcd-sys — авто-BCD недоступен.")
+            elif bcd_missing:
+                self.append_log(
+                    "⚠ Для авто-создания BCD (BCD-SYS) не хватает: " +
+                    ", ".join(bcd_missing) +
+                    "\n  sudo apt install libhivex-bin pev attr fatattr xxd"
+                    "\n  (без них загрузчик придётся доделывать вручную)")
 
         def pick_iso(self):
             path, _ = QFileDialog.getOpenFileName(

@@ -5,7 +5,7 @@
 # Ставит приложение в /usr/share/wintogo (+ команда wintogo и ярлык в меню).
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$DIR/build/wintogo-creator_${VERSION}_all"
 
@@ -24,6 +24,8 @@ install -m 644 "$DIR/assets/wintogo.svg" "$BUILD/usr/share/wintogo/assets/wintog
 install -m 644 "$DIR/assets/wintogo.svg" \
     "$BUILD/usr/share/icons/hicolor/scalable/apps/wintogo.svg"
 install -m 644 "$DIR/README.md" "$BUILD/usr/share/doc/wintogo/README.md"
+# вендоренный BCD-SYS (GPL-3.0) — целиком, со своей лицензией
+cp -r "$DIR/third_party" "$BUILD/usr/share/wintogo/third_party"
 # шаблон BCD, если появится (иначе каталог просто пустой)
 [ -f "$DIR/assets/bcd/BCD" ] && install -m 644 "$DIR/assets/bcd/BCD" \
     "$BUILD/usr/share/wintogo/assets/bcd/BCD" || true
@@ -57,8 +59,8 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.10), python3-pyqt6, wimtools, gdisk, dosfstools,
- ntfs-3g, policykit-1, udisks2, parted
-Recommends: libhivex-bin
+ ntfs-3g, policykit-1, udisks2, parted, libhivex-bin, pev, attr, fatattr, xxd
+Recommends: ms-sys
 Maintainer: Stanislav <gronowesuzanne@mail.com>
 Description: Create bootable external Windows drives from Linux
  WinToGo Creator deploys Windows 10/11 from an ISO onto an external
