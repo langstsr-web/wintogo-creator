@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="24" fill="#1b2735"/>
+  <!-- корпус внешнего SSD -->
+  <rect x="30" y="40" width="68" height="48" rx="8" fill="#2e4763" stroke="#4f7bb0" stroke-width="2"/>
+  <!-- разъём USB-C -->
+  <rect x="98" y="56" width="14" height="16" rx="4" fill="#4f7bb0"/>
+  <!-- окно Windows (четыре плитки) -->
+  <g fill="#37b6ff">
+    <rect x="44" y="52" width="12" height="12" rx="1.5"/>
+    <rect x="60" y="52" width="12" height="12" rx="1.5"/>
+    <rect x="44" y="66" width="12" height="12" rx="1.5"/>
+    <rect x="60" y="66" width="12" height="12" rx="1.5"/>
+  </g>
+  <!-- стрелка «to go» -->
+  <path d="M78 64 h10 M84 59 l6 5 l-6 5" fill="none" stroke="#7CFC98" stroke-width="3"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

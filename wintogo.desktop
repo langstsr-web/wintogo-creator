@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=WinToGo Creator
+GenericName=Windows на внешний диск
+Comment=Создание загрузочного внешнего диска с Windows из Linux
+Exec=python3 "/home/stanislav/Проекты/WinToGo/wintogo.py"
+Icon=/home/stanislav/Проекты/WinToGo/assets/wintogo.svg
+Terminal=false
+Categories=System;Utility;Qt;
+Keywords=windows;usb;wintogo;ssd;bootable;загрузочный;флешка;
