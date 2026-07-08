@@ -33,7 +33,7 @@ from pathlib import Path
 APP_NAME = "WinToGo Creator"
 APP_ID = "wintogo"
 ORG = "WinToGo"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 # Каталоги с системными утилитами — pkexec обрезает PATH, поэтому дополняем явно.
 SBIN_PATHS = ["/usr/sbin", "/sbin", "/usr/local/sbin"]
@@ -440,7 +440,7 @@ def try_bcd_sys(win_mount, esp_mount, firmware):
     missing = bcd_sys_missing_tools()
     if missing:
         log("BCD-SYS есть, но не хватает утилит: " + ", ".join(missing) +
-            " (sudo apt install libhivex-bin pev attr fatattr xxd) — запасной способ")
+            " (sudo apt install libhivex-bin attr fatattr xxd) — запасной способ")
         return False
     if run_bcd_sys(win_mount, esp_mount, firmware):
         log("Загрузчик и BCD настроены через BCD-SYS ✓")
@@ -609,7 +609,7 @@ def core_create(params):
             ("загрузчик через BCD-SYS (копирует EFI-файлы + создаёт BCD)"
              if bcd_sys_script() and not bcd_sys_missing_tools()
              else "загрузчик: запасной способ (BCD-SYS недоступен) — "
-                  "проверьте зависимости libhivex-bin/pev/attr/fatattr/xxd"),
+                  "проверьте зависимости libhivex-bin/attr/fatattr/xxd"),
         ]
         for step in plan:
             log("[dry-run] " + step)
@@ -828,7 +828,7 @@ def run_gui():
             if core:
                 self.append_log(
                     "⚠ Нет основных утилит: " + ", ".join(core) +
-                    "\n  sudo apt install wimtools gdisk dosfstools ntfs-3g policykit-1")
+                    "\n  sudo apt install wimtools gdisk dosfstools ntfs-3g pkexec")
             bcd_missing = bcd_sys_missing_tools()
             if not bcd_sys_script():
                 self.append_log("⚠ Не найден third_party/bcd-sys — авто-BCD недоступен.")
@@ -836,7 +836,7 @@ def run_gui():
                 self.append_log(
                     "⚠ Для авто-создания BCD (BCD-SYS) не хватает: " +
                     ", ".join(bcd_missing) +
-                    "\n  sudo apt install libhivex-bin pev attr fatattr xxd"
+                    "\n  sudo apt install libhivex-bin attr fatattr xxd"
                     "\n  (без них загрузчик придётся доделывать вручную)")
 
         def pick_iso(self):
