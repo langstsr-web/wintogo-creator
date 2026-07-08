@@ -5,7 +5,7 @@
 # Ставит приложение в /usr/share/wintogo (+ команда wintogo и ярлык в меню).
 set -euo pipefail
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$DIR/build/wintogo-creator_${VERSION}_all"
 
@@ -59,7 +59,7 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.10), python3-pyqt6, wimtools, gdisk, dosfstools,
- ntfs-3g, policykit-1, udisks2, parted, libhivex-bin, pev, attr, fatattr, xxd
+ ntfs-3g, policykit-1, udisks2, parted, libhivex-bin, attr, fatattr, xxd
 Recommends: ms-sys
 Maintainer: Stanislav <gronowesuzanne@mail.com>
 Description: Create bootable external Windows drives from Linux
