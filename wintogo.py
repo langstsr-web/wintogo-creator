@@ -23,6 +23,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,7 +34,7 @@ from pathlib import Path
 APP_NAME = "WinToGo Creator"
 APP_ID = "wintogo"
 ORG = "WinToGo"
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 
 # Каталоги с системными утилитами — pkexec обрезает PATH, поэтому дополняем явно.
 SBIN_PATHS = ["/usr/sbin", "/sbin", "/usr/local/sbin"]
@@ -397,6 +398,14 @@ def run_bcd_sys(win_mount, esp_mount, firmware, prodname=None):
     try:
         dst = os.path.join(work, "bcd-sys")
         shutil.copytree(BCD_SYS_DIR, dst)
+        # bcd-sys.sh вызывает соседние скрипты как ./winload.sh и т.п. — без
+        # бита исполнения они молча дают пустой вывод, и hivexsh «успешно»
+        # оставляет BCD без записи об ОС (ошибка 0xc0000098 при загрузке).
+        for sh_root, _sh_dirs, sh_files in os.walk(dst):
+            for f in sh_files:
+                if f.endswith(".sh"):
+                    p = os.path.join(sh_root, f)
+                    os.chmod(p, os.stat(p).st_mode | 0o755)
         main = os.path.join(dst, "Linux", "bcd-sys.sh")
         text = Path(main).read_text()
         text = text.replace("if [[ $EUID -eq 0 ]]; then",
@@ -410,7 +419,9 @@ def run_bcd_sys(win_mount, esp_mount, firmware, prodname=None):
                 ': # peres requirement dropped by WinToGo (unused on fresh disk)', 1)
         Path(main).write_text(text)
 
-        cmd = ["bash", "./bcd-sys.sh", win_mount, "-f", firmware, "-v"]
+        # -c (--clean): если на разделе уже есть BCD (повторный запуск,
+        # починка), пересоздать хранилища с нуля, а не обновлять их.
+        cmd = ["bash", "./bcd-sys.sh", win_mount, "-f", firmware, "-v", "-c"]
         if esp_mount:
             cmd += ["-s", esp_mount]
         if prodname:
@@ -424,12 +435,45 @@ def run_bcd_sys(win_mount, esp_mount, firmware, prodname=None):
             line = line.rstrip()
             if line:
                 log("[bcd-sys] " + line)
-        return proc.wait() == 0
+        if proc.wait() != 0:
+            return False
+        # Не верить коду возврата: убедиться, что запись об ОС реально в BCD.
+        if firmware == "uefi":
+            bcd_path = os.path.join(esp_mount, "EFI", "Microsoft", "Boot", "BCD")
+        else:
+            bcd_path = os.path.join(win_mount, "Boot", "BCD")
+        if not _bcd_store_valid(bcd_path):
+            log("BCD-SYS отчитался об успехе, но в BCD нет записи об ОС — "
+                "результат отвергнут")
+            return False
+        return True
     except Exception as e:
         log(f"BCD-SYS: исключение {e}")
         return False
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _bcd_store_valid(bcd_path):
+    """Проверить, что BCD содержит запись osloader (тип 0x10200003) и что
+    device-элементы (11000001) не пустые. Ловит «пустой» BCD, который иначе
+    приводит к 0xc0000098 при загрузке."""
+    if not os.path.exists(bcd_path):
+        return False
+    try:
+        out = run(["hivexregedit", "--export", bcd_path, "\\Objects"]).stdout
+    except Exception as e:
+        log(f"проверка BCD не удалась: {e}")
+        return False
+    if "dword:10200003" not in out:            # нет записи загрузчика Windows
+        return False
+    # Каждый ключ ...\Elements\11000001 обязан иметь значение Element
+    blocks = re.split(r"\n\[", out)
+    for b in blocks:
+        if b.split("]", 1)[0].endswith("\\Elements\\11000001"):
+            if '"Element"=' not in b:
+                return False
+    return True
 
 
 def try_bcd_sys(win_mount, esp_mount, firmware):
