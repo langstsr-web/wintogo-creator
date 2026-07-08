@@ -34,7 +34,7 @@ from pathlib import Path
 APP_NAME = "WinToGo Creator"
 APP_ID = "wintogo"
 ORG = "WinToGo"
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 
 # Каталоги с системными утилитами — pkexec обрезает PATH, поэтому дополняем явно.
 SBIN_PATHS = ["/usr/sbin", "/sbin", "/usr/local/sbin"]
@@ -337,11 +337,19 @@ def format_partitions(esp, win, label):
     run(["mkfs.ntfs", "--quick", "-L", (label or "Windows")[:32], win])
 
 
-def apply_image(wim_path, index, win_mount):
+def apply_image(wim_path, index, win_part):
+    """Развернуть образ на НЕсмонтированный NTFS-раздел (блочное устройство).
+
+    Применять нужно именно на устройство, а не в смонтированный каталог:
+    в каталог wimlib не восстанавливает NTFS-метаданные Windows — ACL
+    (в т.ч. на SAM), ADS, DOS-имена, junction-точки становятся симлинками.
+    Такая система грузится, но OOBE зацикливается: LocalUser Plugin падает
+    с 0x80070490 и не может создать профиль пользователя.
+    """
     stage("Развёртывание Windows (это долго)")
     require_tools(["wimlib-imagex"])
     proc = subprocess.Popen(
-        ["wimlib-imagex", "apply", wim_path, str(index), win_mount],
+        ["wimlib-imagex", "apply", wim_path, str(index), win_part],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, env=_augmented_env(), bufsize=1,
     )
@@ -650,7 +658,8 @@ def core_create(params):
             (f"parted … ESP {ESP_SIZE_MIB}MiB + Windows(остаток); mkfs.fat/mkfs.ntfs"
              if firmware == "uefi" else
              f"parted … одна NTFS-партиция; mkfs.ntfs; set boot on"),
-            f"wimlib-imagex apply <iso>/sources/install.wim {params.get('index')} <win>",
+            f"wimlib-imagex apply <iso>/sources/install.wim {params.get('index')} "
+            f"<win-раздел, несмонтированный: сохраняет ACL/junction>",
             ("загрузчик через BCD-SYS (копирует EFI-файлы + создаёт BCD)"
              if bcd_sys_script() and not bcd_sys_missing_tools()
              else "загрузчик: запасной способ (BCD-SYS недоступен) — "
@@ -681,8 +690,10 @@ def core_create(params):
         esp, win = partition_device(device, firmware)
         format_partitions(esp, win, params.get("label"))
 
+        # Сначала apply на несмонтированный раздел (сохраняет ACL/junction),
+        # монтируем уже после — только для установки загрузчика.
+        apply_image(wim, params.get("index", 1), win)
         run(["mount", win, win_mp])
-        apply_image(wim, params.get("index", 1), win_mp)
 
         if firmware == "uefi":
             run(["mount", esp, esp_mp])
