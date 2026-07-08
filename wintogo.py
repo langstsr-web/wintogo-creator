@@ -34,7 +34,7 @@ from pathlib import Path
 APP_NAME = "WinToGo Creator"
 APP_ID = "wintogo"
 ORG = "WinToGo"
-VERSION = "0.2.5"
+VERSION = "0.2.6"
 
 # Каталоги с системными утилитами — pkexec обрезает PATH, поэтому дополняем явно.
 SBIN_PATHS = ["/usr/sbin", "/sbin", "/usr/local/sbin"]
@@ -359,7 +359,8 @@ def apply_image(wim_path, index, win_part):
             continue
         pct = None
         if "%" in line:
-            frag = line.split("%")[0].split()[-1].replace(",", ".")
+            # wimlib пишет процент в скобках: «... 90 MiB of 9003 MiB (1%) done»
+            frag = line.split("%")[0].split()[-1].replace(",", ".").lstrip("(")
             try:
                 pct = float(frag)
             except ValueError:
