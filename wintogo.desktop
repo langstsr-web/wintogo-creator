@@ -6,5 +6,5 @@ Comment=Создание загрузочного внешнего диска с
 Exec=python3 "/home/stanislav/Проекты/WinToGo/wintogo.py"
 Icon=/home/stanislav/Проекты/WinToGo/assets/wintogo.svg
 Terminal=false
-Categories=System;Utility;Qt;
+Categories=System;Qt;
 Keywords=windows;usb;wintogo;ssd;bootable;загрузочный;флешка;
