@@ -5,8 +5,8 @@
 # Ставит приложение в /usr/share/wintogo (+ команда wintogo и ярлык в меню).
 set -euo pipefail
 
-VERSION="0.2.3"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="$(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$DIR/wintogo.py")"
 BUILD="$DIR/build/wintogo-creator_${VERSION}_all"
 
 rm -rf "$DIR/build"
@@ -47,7 +47,7 @@ Comment=Создание загрузочного внешнего диска с
 Exec=wintogo
 Icon=wintogo
 Terminal=false
-Categories=System;Utility;Qt;
+Categories=System;Qt;
 Keywords=windows;usb;wintogo;ssd;bootable;загрузочный;флешка;
 EOF
 
